@@ -14,94 +14,119 @@ WiFiUDP udp;
 unsigned int udpPort = 2000;
 
 #define bufferSize 8192
-char incomingBuffer[255];
+const byte bufferCharSize = 255;
+char incomingBuffer[bufferCharSize];
 char outgoingBuffer[bufferSize]; //Where we get the UDP data
 uint8_t iofs = 0;
 
 void setup()
 {
-    Serial.begin(115200);
-    Serial.println("Welcome to SkyNet.");
+  Serial.begin(115200);
+  Serial.println("");
+  Serial.println("");
+  Serial.println("Welcome to SkyNet.");
 
-    connectToAP();
+  connectToAP();
 }
 
 void loop()
 {
-    if (WiFi.status() != WL_CONNECTED)
+  // Check WiFi connectivity;
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    // Reconnect
+    Serial.println("Disconnected.");
+    while (1)
     {
-        Serial.println("Disconnected.");
-        while (1)
-        {
-            if (connectToAP())
-                break;
-        }
+      if (connectToAP())
+        break;
+    }
+  }
+  else
+  {
+    // We're connected, rock on!
+
+    int packetSize = udp.parsePacket();
+    if (packetSize)
+    {
+      // We've received a UDP packet, send it to serial
+      int len = udp.read(incomingBuffer, 255);
+      if (len > 0)
+      {
+        incomingBuffer[len] = 0;
+      }
+
+      Serial.print("Received From UDP: ");
+      Serial.println(incomingBuffer);
     }
     else
     {
+      static boolean recvInProgress = false;
+      static byte ndx = 0;
+      char startMarker = '@';
+      char endMarker = ';';
+      char rc;
 
-        int packetSize = udp.parsePacket();
-        if (packetSize)
+      while (Serial.available() > 0)
+      {
+        rc = Serial.read();
+
+        if (recvInProgress == true)
         {
-            // We've received a UDP packet, send it to serial
-            int len = udp.read(incomingBuffer, 255);
-            if (len > 0)
+          if (rc != endMarker)
+          {
+            incomingBuffer[ndx] = rc;
+            ndx++;
+            if (ndx >= bufferCharSize)
             {
-                incomingBuffer[len] = 0;
+              ndx = bufferCharSize - 1;
             }
+          }
+          else
+          {
+            incomingBuffer[ndx] = '\0'; // terminate the string
+            recvInProgress = false;
+            
+            Serial.print("Received From Serial: ");
+            Serial.println(incomingBuffer);
 
-            Serial.print(incomingBuffer);
+            udp.beginPacket(ServerIP, udpPort); //Send Data to Slave unit
+            udp.write(incomingBuffer, ndx);
+            udp.endPacket();
+            ndx = 0;
+          }
         }
-        else
+
+        else if (rc == startMarker)
         {
-            iofs = 0;
-            //If serial data is recived send it to UDP
-            if (Serial.available())
-            {
-                while (1)
-                {
-                    if (Serial.available())
-                    {
-                        outgoingBuffer[iofs] = char(Serial.read()); // read char from UART
-                        if (iofs < bufferSize - 1)
-                        {
-                            iofs++;
-                        }
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                udp.beginPacket(ServerIP, udpPort); //Send Data to Master unit
-                udp.write(outgoingBuffer, iofs);
-                udp.endPacket();
-            }
+          recvInProgress = true;
         }
+      }
     }
+  }
 }
 
 bool connectToAP()
 {
-    WiFi.disconnect();
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, pass); //Connect to access point
-    // Wait for connection
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("");
-    Serial.print("Connected to: ");
-    Serial.println(ssid);
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
+  Serial.println("Connecting ...");
+  WiFi.disconnect();
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, pass); //Connect to access point
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Connected to: ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
 
-    //Start UDP
-    Serial.println("Starting UDP");
-    udp.begin(udpPort);
-    Serial.print("Local port: ");
-    Serial.println(udp.localPort());
+  //Start UDP
+  Serial.println("Starting UDP");
+  udp.begin(udpPort);
+  Serial.print("Local port: ");
+  Serial.println(udp.localPort());
 }
